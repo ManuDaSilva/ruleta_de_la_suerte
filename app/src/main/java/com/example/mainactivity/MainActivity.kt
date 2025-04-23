@@ -1,5 +1,10 @@
 package com.example.mainactivity
 
+import com.example.mainactivity.ui.theme.MusicService
+import com.example.mainactivity.ui.theme.HelpActivity
+
+
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -20,7 +25,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 
-import androidx.compose.runtime.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
@@ -45,6 +49,7 @@ import io.reactivex.rxjava3.schedulers.Schedulers
 import java.text.SimpleDateFormat
 import java.util.*
 import android.util.Log
+
 
 import androidx.compose.ui.platform.LocalContext
 import com.example.mainactivity.database.AppDatabase
@@ -91,7 +96,119 @@ import androidx.compose.foundation.Image
 import androidx.compose.animation.core.LinearEasing
 
 
+// MUSICA DE FONDO
+import android.content.Intent
 
+// Notificaciones
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import androidx.core.app.ActivityCompat
+
+// CAPTURAS DE PANTALLA
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.content.ContentValues
+import android.os.Environment
+import android.provider.MediaStore
+import android.view.View
+import android.widget.Toast
+
+//CALENDARIO
+import android.Manifest
+import android.provider.CalendarContract
+import androidx.compose.ui.res.stringResource
+import java.util.Calendar
+import java.util.TimeZone
+
+//UBICACION JUGADOR
+import com.google.android.gms.location.LocationServices
+
+fun guardarEventoEnCalendario(context: Context, premio: Int) {
+    val calendar = Calendar.getInstance()
+    val horaInicio = calendar.timeInMillis
+    val horaFin = horaInicio + 60 * 60 * 1000 // 1 hora de duración
+
+    val values = ContentValues().apply {
+        put(CalendarContract.Events.DTSTART, horaInicio)
+        put(CalendarContract.Events.DTEND, horaFin)
+        put(CalendarContract.Events.TITLE, "Victoria en la ruleta")
+        put(CalendarContract.Events.DESCRIPTION, "Ganaste $premio monedas")
+        put(CalendarContract.Events.CALENDAR_ID, 1)
+        put(CalendarContract.Events.EVENT_TIMEZONE, TimeZone.getDefault().id)
+    }
+
+    val uri = context.contentResolver.insert(CalendarContract.Events.CONTENT_URI, values)
+    if (uri != null) {
+        Log.d("Calendario", "✅ Evento guardado: $uri")
+    } else {
+        Log.e("Calendario", "❌ Error al guardar evento")
+    }
+}
+
+
+fun guardarCaptura(nombreArchivo: String, view: View, context: Context) {
+    val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    view.draw(canvas)
+
+    val resolver = context.contentResolver
+    val contentValues = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, "$nombreArchivo.jpg")
+        put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Ruleta")
+    }
+
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+    uri?.let {
+        val stream = resolver.openOutputStream(it)
+        stream?.let { output ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, output)
+            output.close()
+            Toast.makeText(context, "📸 Captura guardada en Galería", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
+
+
+fun mostrarNotificacion(context: android.content.Context, premio: Int) {
+    val channelId = "victoria_channel"
+    val channelName = "Notificaciones de Victoria"
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val importance = NotificationManager.IMPORTANCE_DEFAULT
+        val channel = NotificationChannel(channelId, channelName, importance)
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.createNotificationChannel(channel)
+    }
+
+    val intent = Intent(context, MainActivity::class.java)
+    val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+    val builder = NotificationCompat.Builder(context, channelId)
+        .setSmallIcon(R.drawable.ic_launcher_foreground)
+        .setContentTitle("🎉 ¡Has ganado!")
+        .setContentText("Obtuviste $premio monedas en la ruleta")
+        .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+        .setContentIntent(pendingIntent)
+        .setAutoCancel(true)
+
+    if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS)
+        == PackageManager.PERMISSION_GRANTED
+    ) {
+        val notificationId = 1
+        NotificationManagerCompat.from(context).notify(notificationId, builder.build())
+    }
+
+}
 
 
 sealed class Pantalla(val ruta: String, val titulo: String) {
@@ -100,13 +217,55 @@ sealed class Pantalla(val ruta: String, val titulo: String) {
     object Historial : Pantalla("historial", "Historial")
     object Ranking : Pantalla("ranking", "Ranking")
 }
+//solicitar ubicacion
+fun solicitarPermisosUbicacion(activity: Activity) {
+    if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION)
+        != PackageManager.PERMISSION_GRANTED) {
 
-
+        ActivityCompat.requestPermissions(
+            activity,
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            1001
+        )
+    }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        solicitarPermisosUbicacion(this)
+        //notificacion
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                    1001
+                )
+            }
+        }
+        //calendario
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_CALENDAR)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.WRITE_CALENDAR, Manifest.permission.READ_CALENDAR),
+                1001
+            )
+        }
+        //ubicacion jugador
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                1002
+            )
+        }
+
         setContent {
             MainActivityTheme {
                 val navController = rememberNavController()
@@ -171,7 +330,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-
     }
 }
 
@@ -198,7 +356,7 @@ fun PantallaBienvenida(navController: NavController) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "RULETA DE LA SUERTE",
+            text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.padding(bottom = 40.dp)
         )
@@ -221,8 +379,16 @@ fun PantallaBienvenida(navController: NavController) {
             },
             enabled = nombre.isNotBlank()
         ) {
-            Text("EMPEZAR A JUGAR")
+            Text(text = stringResource(R.string.start_game))
         }
+        val context = LocalContext.current
+
+        Button(onClick = {
+            context.startActivity(Intent(context, HelpActivity::class.java))
+        }) {
+            Text(text = stringResource(R.string.help))
+        }
+
     }
 }
 
@@ -239,6 +405,8 @@ fun PantallaJuego(nombreJugador: String) {
         animationSpec = tween(durationMillis = 1000, easing = LinearEasing),
         label = "rotarRuleta"
     )
+
+    var musicaActiva by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -269,30 +437,58 @@ fun PantallaJuego(nombreJugador: String) {
                     val premio = (0..20).random()
                     saldo += premio
                     ultimoPremio = premio
-                    giro += (720..1440).random().toFloat() // rotación aleatoria
-
-                    //song spin
-//                    val mediaPlayer = MediaPlayer.create(context, R.raw.spin_sound_effect)
-//                    mediaPlayer.start()
-
-
-                    // GUARDAR PARTIDA
-                    val fecha = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                    val partida = Partida(
-                        fecha = fecha,
-                        monedasGanadas = premio,
-                        saldoFinal = saldo,
-                        nombreJugador = nombreJugador
+                    val rootView = (context as Activity).window.decorView.rootView
+                    guardarCaptura(
+                        "captura_ruleta_${System.currentTimeMillis()}",
+                        rootView,
+                        context
                     )
+                    guardarEventoEnCalendario(context, premio)
 
-                    AppDatabase.getInstance(context).partidaDao()
-                        .insertar(partida)
-                        .subscribeOn(Schedulers.io())
-                        .observeOn(AndroidSchedulers.mainThread())
-                        .subscribe(
-                            { Log.d("BD", "Partida guardada") },
-                            { error -> Log.e("BD", "Error al guardar", error) }
-                        )
+                    giro += (720..1440).random().toFloat()
+
+                    // 🔔 Mostrar notificación al ganar
+                    mostrarNotificacion(context, premio)
+
+                    //ubicacion jugador
+                    val fusedLocationClient =
+                        LocationServices.getFusedLocationProviderClient(context as Activity)
+
+                    if (ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.ACCESS_FINE_LOCATION
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                            val latitud = location?.latitude
+                            val longitud = location?.longitude
+
+                            // Guardar partida
+                            val fecha =
+                                SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(
+                                    Date()
+                                )
+                            val partida = Partida(
+                                fecha = fecha,
+                                monedasGanadas = premio,
+                                saldoFinal = saldo,
+                                nombreJugador = nombreJugador,
+                                latitud = latitud,
+                                longitud = longitud
+                            )
+
+                            AppDatabase.getInstance(context).partidaDao()
+                                .insertar(partida)
+                                .subscribeOn(Schedulers.io())
+                                .observeOn(AndroidSchedulers.mainThread())
+                                .subscribe(
+                                    { Log.d("BD", "Partida guardada con ubicación") },
+                                    { error -> Log.e("BD", "Error al guardar partida", error) }
+                                )
+                        }
+                    } else {
+                        Log.e("Ubicación", "Permiso de ubicación no concedido")
+                    }
                 }
             },
             enabled = saldo > 0
@@ -300,11 +496,29 @@ fun PantallaJuego(nombreJugador: String) {
             Text("Girar ruleta (-1 moneda)")
         }
 
+
+        // BOTÓN DE MÚSICA DE FONDO
+        Button(
+            onClick = {
+                val intent = Intent(context, MusicService::class.java)
+                if (!musicaActiva) {
+                    context.startService(intent)
+                } else {
+                    context.stopService(intent)
+                }
+                musicaActiva = !musicaActiva
+            }
+        ) {
+            Text(if (musicaActiva) "🔇 Detener Música" else "🔊 Activar Música")
+        }
+
+        // MOSTRAR PREMIO
         ultimoPremio?.let {
-            Text("¡Ganaste $it monedas!")
+            Text(text = stringResource(R.string.win_message))
         }
     }
 }
+
 
 
 
@@ -391,6 +605,14 @@ fun PantallaHistorial() {
                         Text(text = "Fecha: ${partida.fecha}")
                         Text(text = "Ganadas: ${partida.monedasGanadas}")
                         Text(text = "Saldo final: ${partida.saldoFinal}")
+                        if (partida.latitud != null && partida.longitud != null) {
+                            Text(text = stringResource(R.string.location_label))
+                        } else {
+                            Text(text = "Ubicación no disponible")
+                        }
+                        val lat = partida.latitud?.let { String.format("%.4f", it) } ?: "?"
+                        val lon = partida.longitud?.let { String.format("%.4f", it) } ?: "?"
+                        Text(text = "Ubicación: $lat, $lon")
                     }
                 }
             }

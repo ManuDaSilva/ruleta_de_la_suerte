@@ -6,8 +6,10 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "partidas")
 data class Partida(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
-    val nombreJugador: String,
     val fecha: String,
     val monedasGanadas: Int,
     val saldoFinal: Int,
+    val nombreJugador: String,
+    val latitud: Double?,
+    val longitud: Double?
 )

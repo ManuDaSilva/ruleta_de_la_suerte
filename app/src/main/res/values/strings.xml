@@ -1,3 +1,7 @@
 <resources>
-    <string name="app_name">MainActivity</string>
+    <string name="app_name">Ruleta de la Suerte</string>
+    <string name="start_game">Empezar a Jugar</string>
+    <string name="help">Ayuda</string>
+    <string name="win_message">¡Ganaste %1$d monedas!</string>
+    <string name="location_label">Ubicación: %1$.4f, %2$.4f</string>  <!-- Ejemplo de latitud y longitud -->
 </resources>
