@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "677106691035",
+    "project_id": "producto3morillasdasilvamanuel",
+    "storage_bucket": "producto3morillasdasilvamanuel.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:677106691035:android:5979a60ab707db3e73d5fe",
+        "android_client_info": {
+          "package_name": "com.example.mainactivity"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "677106691035-29s33a6c54dv9ns683nblc89401soqug.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDFSRGpgCXGV1e6O_naJwGBCQyFFbUybdg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "677106691035-29s33a6c54dv9ns683nblc89401soqug.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

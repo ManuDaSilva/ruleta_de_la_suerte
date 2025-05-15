@@ -122,13 +122,312 @@ import android.widget.Toast
 
 //CALENDARIO
 import android.Manifest
+import android.app.Activity.RESULT_OK
 import android.provider.CalendarContract
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.ui.res.stringResource
 import java.util.Calendar
 import java.util.TimeZone
 
 //UBICACION JUGADOR
 import com.google.android.gms.location.LocationServices
+
+// signin
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Button
+import androidx.compose.runtime.mutableStateListOf
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FieldValue
+
+//interfaz de Retrofit
+import retrofit2.Call
+import retrofit2.http.GET
+import retrofit2.http.Query
+
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import retrofit2.Retrofit
+import retrofit2.converter.moshi.MoshiConverterFactory
+import retrofit2.Callback
+import retrofit2.Response
+
+fun updateTopTen(playerName: String, coinsWon: Int) {
+    val db = FirebaseFirestore.getInstance()
+
+    // Referencia al Top Ten
+    val topTenRef = db.collection("topTen").document("topTenList")
+
+    // Obtener el Top Ten y agregar el nuevo puntaje
+    topTenRef.get().addOnSuccessListener { document ->
+        val currentTopTen = document.data?.get("players") as? List<Map<String, Any>> ?: emptyList()
+
+        // Agregar el nuevo jugador a la lista
+        val newPlayer = mapOf(
+            "playerName" to playerName,
+            "coinsWon" to coinsWon
+        )
+        val updatedTopTen = (currentTopTen + newPlayer).sortedByDescending { it["coinsWon"] as Int }
+            .take(10) // Tomamos los 10 primeros
+
+        // Actualizar el Top Ten
+        topTenRef.update("players", updatedTopTen)
+            .addOnSuccessListener {
+                Log.d("Firestore", "Top Ten actualizado correctamente")
+            }
+            .addOnFailureListener { e ->
+                Log.w("Firestore", "Error al actualizar Top Ten", e)
+            }
+    }
+}
+
+fun startGame(playerName: String) {
+    val db = FirebaseFirestore.getInstance()
+
+    // Crear una nueva partida en Firestore
+    val gameRef = db.collection("games").document(playerName)
+    val gameData = mapOf(
+        "playerName" to playerName,
+        "status" to "inProgress",
+        "startTime" to System.currentTimeMillis()
+    )
+
+    gameRef.set(gameData)
+        .addOnSuccessListener {
+            Log.d("Firestore", "Juego iniciado correctamente")
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al iniciar juego", e)
+        }
+}
+
+fun sendMessage(playerName: String, message: String) {
+    val db = FirebaseFirestore.getInstance()
+
+    // Referencia a la colección de mensajes
+    val messagesRef = db.collection("gameMessages")
+
+    val messageData = mapOf(
+        "playerName" to playerName,
+        "message" to message,
+        "timestamp" to System.currentTimeMillis()
+    )
+
+    messagesRef.add(messageData)
+        .addOnSuccessListener {
+            Log.d("Firestore", "Mensaje enviado correctamente")
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al enviar mensaje", e)
+        }
+}
+
+
+interface ApiService {
+
+    @GET("getTopTen")  // URL del endpoint
+    fun getTopTen(@Query("gameId") gameId: String): Call<List<Partida>>
+
+    // Otros endpoints según lo que necesites
+}
+
+
+val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+
+val retrofit = Retrofit.Builder()
+    .baseUrl("https://api.example.com/")  // Cambia con la URL de tu backend
+    .addConverterFactory(MoshiConverterFactory.create(moshi))
+    .build()
+
+val apiService = retrofit.create(ApiService::class.java)
+
+
+fun increasePrize() {
+    val db = FirebaseFirestore.getInstance()
+    val prizeRef = db.collection("prize").document("currentPrize")
+
+    // Aumentar el valor del premio común
+    prizeRef.update("value", FieldValue.increment(10))  // Aumenta el premio en 10
+        .addOnSuccessListener {
+            Log.d("Firestore", "Premio común incrementado")
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al incrementar el premio común", e)
+        }
+}
+
+fun getPrizeAndReset() {
+    val db = FirebaseFirestore.getInstance()
+    val prizeRef = db.collection("prize").document("currentPrize")
+
+    // Obtener el valor del premio común
+    prizeRef.get()
+        .addOnSuccessListener { document ->
+            if (document.exists()) {
+                val prize = document.getLong("value") ?: 0
+                Log.d("Firestore", "Premio común actual: $prize")
+
+                // Aquí podrías entregar el premio al jugador y luego resetearlo
+                awardPrizeToPlayer(prize)
+
+                // Resetear el premio común
+                prizeRef.update("value", 0)
+                    .addOnSuccessListener {
+                        Log.d("Firestore", "Premio común reseteado")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.w("Firestore", "Error al resetear el premio común", e)
+                    }
+            }
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al obtener el premio común", e)
+        }
+}
+
+fun awardPrizeToPlayer(prize: Long) {
+    // Aquí puedes aumentar las monedas del jugador con el valor del premio común
+    Log.d("Firestore", "Jugador ha ganado $prize monedas")
+
+    // Actualizar las monedas del jugador, por ejemplo, aumentando su saldo en Firestore
+    val playerRef = FirebaseFirestore.getInstance().collection("players").document("playerID")
+
+    playerRef.update("coins", FieldValue.increment(prize))
+        .addOnSuccessListener {
+            Log.d("Firestore", "Jugador recibió el premio común")
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al dar el premio al jugador", e)
+        }
+}
+
+
+
+
+data class Victory(
+    val playerName: String = "",
+    val coinsWon: Int = 0,
+    val timestamp: Long = System.currentTimeMillis()  // Timestamp para la fecha
+)
+
+fun saveVictory(playerName: String, coinsWon: Int) {
+    val db = FirebaseFirestore.getInstance()
+    val victoriesRef = db.collection("victories")
+
+    // Crear un objeto de victoria
+    val victory = hashMapOf(
+        "playerName" to playerName,
+        "coinsWon" to coinsWon,
+        "timestamp" to System.currentTimeMillis()  // Timestamp para la fecha
+    )
+
+    // Guardar en la colección "victories"
+    victoriesRef.add(victory)
+        .addOnSuccessListener {
+            Log.d("Firestore", "Victoria guardada correctamente")
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al guardar victoria", e)
+        }
+}
+
+fun getTopTen() {
+    val db = FirebaseFirestore.getInstance()
+    val victoriesRef = db.collection("victories")
+
+    // Obtener las victorias ordenadas por "coinsWon" de forma descendente
+    victoriesRef.orderBy("coinsWon", com.google.firebase.firestore.Query.Direction.DESCENDING)
+        .limit(10)  // Limitar a las primeras 10 victorias
+        .get()
+        .addOnSuccessListener { result ->
+            for (document in result) {
+                val playerName = document.getString("playerName")
+                val coinsWon = document.getLong("coinsWon")
+                Log.d("Firestore", "Jugador: $playerName, Monedas Ganadas: $coinsWon")
+                // Aquí puedes agregar la lógica para mostrar el Top Ten en la interfaz
+            }
+        }
+        .addOnFailureListener { e ->
+            Log.w("Firestore", "Error al obtener el Top Ten", e)
+        }
+}
+
+
+
+
+
+@Composable
+fun GoogleSignInButton() {
+    val context = LocalContext.current  // Obtiene el contexto actual de Compose
+
+    // Configuración de Google Sign-In
+    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        .requestIdToken("1:677106691035:android:5979a60ab707db3e73d5fe")  // Reemplaza con tu Web Client ID de Firebase
+        .requestEmail()
+        .build()
+
+    val googleSignInClient = GoogleSignIn.getClient(context, gso)  // Crea el cliente de Google Sign-In
+
+    // Configura el launcher para manejar el resultado de la actividad
+    val signInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(ApiException::class.java)
+                firebaseAuthWithGoogle(account.idToken!!)  // Autenticación en Firebase
+            } catch (e: ApiException) {
+                Log.w("Google SignIn", "signInResult:failed code=" + e.statusCode)
+            }
+        }
+    }
+
+    // Botón de Google Sign-In
+    Button(onClick = {
+        val signInIntent = googleSignInClient.signInIntent
+        signInLauncher.launch(signInIntent)  // Lanza el intent de Google Sign-In
+    }) {
+        Text("Iniciar sesión con Google")
+    }
+}
+
+private fun firebaseAuthWithGoogle(idToken: String) {
+    val credential = GoogleAuthProvider.getCredential(idToken, null)
+    FirebaseAuth.getInstance().signInWithCredential(credential)
+        .addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                // El inicio de sesión fue exitoso
+                val user = FirebaseAuth.getInstance().currentUser
+                Log.d("FirebaseAuth", "signInWithCredential:success")
+                // Procede con lo que necesites, por ejemplo, redirigir a la pantalla principal
+            } else {
+                // Si el inicio de sesión falla
+                Log.w("FirebaseAuth", "signInWithCredential:failure", task.exception)
+            }
+        }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun DefaultPreview() {
+    MainActivityTheme {
+        GoogleSignInButton()  // Vista previa del botón de Google Sign-In
+    }
+}
+
+
+
+
+
+
+
+
 
 fun guardarEventoEnCalendario(context: Context, premio: Int) {
     val calendar = Calendar.getInstance()
@@ -268,6 +567,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MainActivityTheme {
+                GoogleSignInButton()  // Llama al botón de Google Sign-In
                 val navController = rememberNavController()
                 val items = listOf(Pantalla.Juego, Pantalla.Historial, Pantalla.Ranking) // sin bienvenida
                 val currentBackStack by navController.currentBackStackEntryAsState()
@@ -437,6 +737,7 @@ fun PantallaJuego(nombreJugador: String) {
                     val premio = (0..20).random()
                     saldo += premio
                     ultimoPremio = premio
+
                     val rootView = (context as Activity).window.decorView.rootView
                     guardarCaptura(
                         "captura_ruleta_${System.currentTimeMillis()}",
@@ -446,6 +747,14 @@ fun PantallaJuego(nombreJugador: String) {
                     guardarEventoEnCalendario(context, premio)
 
                     giro += (720..1440).random().toFloat()
+
+                    // Si el jugador pierde, aumenta el premio común
+                    //      if (premio == 0) {
+                    //          increasePrize()
+                    //      } else {
+                    // Si el jugador gana, recupera el premio común y resetealo
+                    //         getPrizeAndReset()
+                    //      }
 
                     // 🔔 Mostrar notificación al ganar
                     mostrarNotificacion(context, premio)
@@ -539,7 +848,7 @@ interface PartidaDao {
     @Insert
     suspend fun insertar(partida: Partida)
 
-    @Query("SELECT * FROM partidas ORDER BY id DESC")
+    //@Query("SELECT * FROM partidas ORDER BY id DESC")
     suspend fun obtenerTodas(): List<Partida>
 }
 
@@ -624,8 +933,29 @@ fun PantallaHistorial() {
 @Composable
 fun PantallaRanking() {
     val context = LocalContext.current
-    val rankingState = remember { mutableStateOf<List<Partida>>(emptyList()) }
+    val rankingState = remember { mutableStateOf<List<Partida>>(emptyList()) }  // Datos de Room
+    val topTen = remember { mutableStateListOf<Map<String, Any>>() }  // Datos de Firestore (Retrofit)
 
+    // Llamada a la API de Retrofit para obtener el Top Ten
+    LaunchedEffect(Unit) {
+        val call = apiService.getTopTen("game123")  // Llamada a tu API
+        call.enqueue(object : Callback<List<Partida>> {
+            override fun onResponse(call: Call<List<Partida>>, response: Response<List<Partida>>) {
+                if (response.isSuccessful) {
+                    val topTen = response.body() ?: emptyList()
+                    rankingState.value = topTen  // Actualiza el estado con el Top Ten
+                } else {
+                    Log.e("Retrofit", "Error en la respuesta")
+                }
+            }
+
+            override fun onFailure(call: Call<List<Partida>>, t: Throwable) {
+                Log.e("Retrofit", "Error en la llamada API", t)
+            }
+        })
+    }
+
+    // Obtener datos de Room (base de datos local)
     LaunchedEffect(Unit) {
         AppDatabase.getInstance(context).partidaDao()
             .obtenerTodas()
@@ -633,54 +963,58 @@ fun PantallaRanking() {
             .observeOn(AndroidSchedulers.mainThread())
             .subscribe(
                 { lista ->
-                    val ordenado = lista.sortedByDescending { it.monedasGanadas }
+                    val ordenado = lista.sortedByDescending { it.monedasGanadas }  // Ordenar por monedas ganadas
                     rankingState.value = ordenado
                 },
-                { error -> Log.e("BD", "Error al cargar ranking", error) }
+                { error -> Log.e("BD", "Error al cargar ranking desde Room", error) }
             )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
+    // UI
+    Column(modifier = Modifier
+        .fillMaxSize()
+        .padding(16.dp)
     ) {
         Text(
-            text = "🏆 Ranking de Partidas",
+            text = "🏆 Ranking de Jugadores",
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(bottom = 16.dp)
         )
 
+        // Mostrar el ranking de Firestore (Retrofit)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(rankingState.value) { index, partida ->
+            items(topTen) { victory ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = when (index) {
-                            0 -> MaterialTheme.colorScheme.primaryContainer // 🥇 primer lugar
-                            1 -> MaterialTheme.colorScheme.secondaryContainer // 🥈 segundo
-                            2 -> MaterialTheme.colorScheme.tertiaryContainer // 🥉 tercero
-                            else -> MaterialTheme.colorScheme.surface
-                        }
-                    ),
                     elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "#${index + 1}",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(text = "Nombre: ${partida.nombreJugador}")
-                        Text(text = "Ganadas: ${partida.monedasGanadas}")
-                        Text(text = "Saldo final: ${partida.saldoFinal}")
-                        Text(text = "Fecha: ${partida.fecha}")
+                        Text(text = "Jugador: ${victory["playerName"]}")
+                        Text(text = "Monedas Ganadas: ${victory["coinsWon"]}")
+                    }
+                }
+            }
+        }
+
+        // Mostrar el ranking de Room (base de datos local)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(rankingState.value) { partida ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(text = "Jugador: ${partida.nombreJugador}")
+                        Text(text = "Monedas Ganadas: ${partida.monedasGanadas}")
+                        Text(text = "Saldo Final: ${partida.saldoFinal}")
                     }
                 }
             }
         }
     }
 }
+
+
 
 
 
